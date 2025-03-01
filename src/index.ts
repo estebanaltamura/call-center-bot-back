@@ -119,35 +119,20 @@ app.post("/webhook", async (req, res) => {
 const sendMessage = async (to: string, messageReceived: string) => {
   console.log(to, messageReceived)
 
-  const settingsRef = db.collection("settings").doc("global");
-  const settingsDoc = await settingsRef.get();
+  const currentHat = db.collection("hats").doc("7f47b7ea-fc49-491a-9bbf-df8da1d3582d");
+  const currentHatDoc = await currentHat.get();
 
-  if (!settingsDoc.exists) {
-    console.error("El documento de configuración global no existe.");
+  if (!currentHatDoc.exists) {
+    console.error("El sombrero no existe.");
     return;
   }
 
-  const currentPrompt = settingsDoc.data()?.currentPrompt;
+  const currentPrompt = currentHatDoc.data()?.prompt;
   if (!currentPrompt) {
-    console.error("El campo currentPrompt no está definido en el documento de configuración global.");
+    console.error("No hay un prompt para el sombrero asignado.");
     return;
   }
-  
-
-  const systemPromptsRef = db.collection("systemPrompts");
-  const querySnapshot = await systemPromptsRef.where("title", "==", currentPrompt).get();
-
-  if (querySnapshot.empty) {
-    console.error(`No se encontró ningún documento en systemPrompts con el título: ${currentPrompt}`);
-    return;
-  }
-
-  const systemPromptDoc = querySnapshot.docs[0].data();
-
-  const systemPrompt = systemPromptDoc.prompts.join(',');
-  console.log(`Documento encontrado en systemPrompts:`, systemPromptDoc);
-
-  const res = await chatGpt(systemPrompt,[{role:'user',content:messageReceived}]);
+  const res = await chatGpt(currentPrompt,[{role:'user',content:messageReceived}]);
   
   if(!res.content) return;
   sendWhatsappMessage(to, res.content)
@@ -236,6 +221,8 @@ app.post("/send-message", async (req, res) => {
   }
 });
 
+
+
 const options = {
   key: fs.readFileSync('/etc/cert/privkey.pem'),
   cert: fs.readFileSync('/etc/cert/fullchain.pem')
@@ -243,7 +230,7 @@ const options = {
 
 
 // En lugar de usar app.listen, crea un servidor HTTPS:
-const PORT = process.env.PORT || 80; // o el puerto que desees usar
+const PORT = process.env.PORT || 5150; // o el puerto que desees usar
 const server = https.createServer(options, app);
 
 // Arranca el servidor HTTPS:
