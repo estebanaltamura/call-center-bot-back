@@ -24,6 +24,11 @@ dotenv.config();
 // Token de verificación para el webhook
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
+
+app.get("/test", (req, res) => {
+  res.status(200).json({ message: "El endpoint de prueba funciona correctamente" });
+});
+
 // Ruta para verificar el webhook
 app.get("/webhook", (req, res) => {
   console.log('entro')
