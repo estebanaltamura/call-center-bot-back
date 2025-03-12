@@ -103,12 +103,13 @@ const sendWhatsappMessage = async (to: string, message: string) => {
     });
 
     // Registro del mensaje saliente en Firestore
-    await db.collection("messages").add({
+    const messagePayload: IMessage = {              
       conversationId: to,
       sender: "company",
       message,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    };
+
+    await SERVICES.CMS.create(Entities.messages, messagePayload);   
 
     console.log(`✅ Mensaje enviado a ${to}`);
   } catch (error: any) {
@@ -177,7 +178,7 @@ app.post("/webhook", async (req, res) => {
             message: text,
           };
 
-          SERVICES.CMS.create(Entities.messages, payload);          
+          await SERVICES.CMS.create(Entities.messages, payload);          
           console.log(`Mensaje registrado de ${from}`);
         }
       }

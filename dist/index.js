@@ -95,12 +95,12 @@ const sendWhatsappMessage = async (to, message) => {
             },
         });
         // Registro del mensaje saliente en Firestore
-        await firebase_1.db.collection("messages").add({
+        const messagePayload = {
             conversationId: to,
             sender: "company",
             message,
-            timestamp: firebase_admin_1.default.firestore.FieldValue.serverTimestamp(),
-        });
+        };
+        await services_1.SERVICES.CMS.create(types_1.Entities.messages, messagePayload);
         console.log(`✅ Mensaje enviado a ${to}`);
     }
     catch (error) {
@@ -161,7 +161,7 @@ app.post("/webhook", async (req, res) => {
                         sender: "customer",
                         message: text,
                     };
-                    services_1.SERVICES.CMS.create(types_1.Entities.messages, payload);
+                    await services_1.SERVICES.CMS.create(types_1.Entities.messages, payload);
                     console.log(`Mensaje registrado de ${from}`);
                 }
             }
