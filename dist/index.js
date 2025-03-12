@@ -63,13 +63,41 @@ const hatManager = new HatManager("7f47b7ea-fc49-491a-9bbf-df8da1d3582d");
  */
 const sendMessage = async (to, messageReceived) => {
     console.log(`📩 Mensaje recibido de ${to}: ${messageReceived}`);
+    // Recuperar todo el hilo de mensajes para la conversación "to"
+    const messagesSnapshot = await firebase_1.db
+        .collection("messages")
+        .where("conversationId", "==", to)
+        // Asumiendo que el campo "createdAt" es de tipo Timestamp de Firestore,
+        // orderBy('createdAt') ordena de forma precisa
+        .orderBy("createdAt")
+        .get();
+    // Extraer los mensajes y tiparlos (asumiendo que cada documento tiene la estructura de IMessageEntity)
+    const conversationMessages = messagesSnapshot.docs.map((doc) => doc.data());
+    // Si fuera necesario, se puede ordenar manualmente hasta el nanosegundo:
+    conversationMessages.sort((a, b) => {
+        // Si los seconds son iguales, ordena por nanosegundos
+        if (a.createdAt.seconds === b.createdAt.seconds) {
+            return a.createdAt.nanoseconds - b.createdAt.nanoseconds;
+        }
+        return a.createdAt.seconds - b.createdAt.seconds;
+    });
+    // Crear un string con todo el hilo, agregando alguna etiqueta para identificar al remitente (opcional)
+    const conversationText = conversationMessages
+        .map((msg) => {
+        const senderLabel = msg.sender === "company" ? "Empresa" : "Cliente";
+        return `${senderLabel}: ${msg.message}`;
+    })
+        .join("\n");
+    // Opcional: Agregar el nuevo mensaje recibido al hilo
+    const fullConversation = conversationText + "\nCliente: " + messageReceived;
+    // Obtener el prompt actualizado
     const prompt = hatManager.getPrompt();
     if (!prompt) {
         console.error("⚠️ No se encontró un prompt actualizado. No se puede responder.");
         return;
     }
-    // Se genera la respuesta usando el servicio de IA
-    const aiResponse = await (0, chatGpt_1.chatGpt)(prompt, [{ role: "user", content: messageReceived }]);
+    // Se genera la respuesta usando el servicio de IA pasando el hilo completo
+    const aiResponse = await (0, chatGpt_1.chatGpt)(prompt, [{ role: "user", content: fullConversation }]);
     if (!aiResponse.content)
         return;
     await sendWhatsappMessage(to, aiResponse.content);
@@ -142,7 +170,7 @@ app.post("/webhook", async (req, res) => {
                             lastMessageDate: firebase_admin_1.default.firestore.Timestamp.fromDate(new Date()),
                             id: from
                         };
-                        services_1.SERVICES.CMS.create(types_1.Entities.conversations, payload);
+                        await services_1.SERVICES.CMS.create(types_1.Entities.conversations, payload);
                         console.log(`Conversación creada para ${from}`);
                         await sendMessage(from, text);
                     }
