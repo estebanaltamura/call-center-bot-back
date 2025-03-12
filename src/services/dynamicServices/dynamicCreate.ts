@@ -8,7 +8,7 @@ export const dynamicCreate = async <T extends keyof EntityTypesMapPayloadValues>
   collection: T,
   item: EntityTypesMapPayloadValues[T]
 ): Promise<EntityTypesMapReturnedValues[T] | undefined> => {
-  const itemId = uuidv4();
+  const itemId = (item as unknown as any).id || uuidv4();
   const payload: EntityTypesMapReturnedValues[T] = {
     id: itemId,
     ...item,
