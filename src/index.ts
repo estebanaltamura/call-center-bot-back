@@ -99,6 +99,8 @@ const sendMessage = async (to: string, messageReceived: string) => {
   // Opcional: Agregar el nuevo mensaje recibido al hilo
   const fullConversation = conversationText + "\nCliente: " + messageReceived;
 
+  console.log(fullConversation)
+
   // Obtener el prompt actualizado
   const prompt = hatManager.getPrompt();
   if (!prompt) {
