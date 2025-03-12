@@ -6,7 +6,7 @@ const uuid_1 = require("uuid");
 const types_1 = require("../../types");
 const firebase_1 = require("../../firebase");
 const dynamicCreate = async (collection, item) => {
-    const itemId = (0, uuid_1.v4)();
+    const itemId = item.id || (0, uuid_1.v4)();
     const payload = {
         id: itemId,
         ...item,
