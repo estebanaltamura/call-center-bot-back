@@ -147,6 +147,13 @@ const sendWhatsappMessage = async (to: string, message: string) => {
 
     await SERVICES.CMS.create(Entities.messages, messagePayload);   
 
+    const conversationPayload = {
+      lastMessageDate: admin.firestore.Timestamp.fromDate(new Date()),
+    }
+
+    const conversationId = to
+    await SERVICES.CMS.update(Entities.conversations, conversationId, conversationPayload);
+
     console.log(`✅ Mensaje enviado a ${to}`);
   } catch (error: any) {
     console.error("❌ Error enviando mensaje:", error.response?.data || error);
@@ -199,7 +206,7 @@ app.post("/webhook", async (req, res) => {
           const messagePayload: IMessage = {              
             conversationId: from,
             sender: "customer",
-            message: text,
+            message: text,            
           };
 
           await SERVICES.CMS.create(Entities.messages, messagePayload);          
@@ -209,15 +216,25 @@ app.post("/webhook", async (req, res) => {
           } else {
             const conversationData = conversationDoc.data();
             if (conversationData?.auto) {
-              // Registrar el mensaje recibido
-          const messagePayload: IMessage = {              
-            conversationId: from,
-            sender: "customer",
-            message: text,
-          };
 
-          await SERVICES.CMS.create(Entities.messages, messagePayload);      
-          
+              const conversationPayload = {
+                lastMessageDate: admin.firestore.Timestamp.fromDate(new Date()),
+              }
+
+              const conversationId = conversationData.id
+
+              await SERVICES.CMS.update(Entities.conversations, conversationId, conversationPayload);
+
+
+              // Registrar el mensaje recibido
+              const messagePayload: IMessage = {              
+                conversationId: from,
+                sender: "customer",
+                message: text,
+              };
+
+              await SERVICES.CMS.create(Entities.messages, messagePayload);      
+
               await sendMessage(from, text);
             } else {
               console.log(`No se responde al usuario ${from} porque auto es false.`);

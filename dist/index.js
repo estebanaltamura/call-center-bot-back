@@ -130,6 +130,11 @@ const sendWhatsappMessage = async (to, message) => {
             message,
         };
         await services_1.SERVICES.CMS.create(types_1.Entities.messages, messagePayload);
+        const conversationPayload = {
+            lastMessageDate: firebase_admin_1.default.firestore.Timestamp.fromDate(new Date()),
+        };
+        const conversationId = to;
+        await services_1.SERVICES.CMS.update(types_1.Entities.conversations, conversationId, conversationPayload);
         console.log(`✅ Mensaje enviado a ${to}`);
     }
     catch (error) {
@@ -186,6 +191,11 @@ app.post("/webhook", async (req, res) => {
                     else {
                         const conversationData = conversationDoc.data();
                         if (conversationData?.auto) {
+                            const conversationPayload = {
+                                lastMessageDate: firebase_admin_1.default.firestore.Timestamp.fromDate(new Date()),
+                            };
+                            const conversationId = conversationData.id;
+                            await services_1.SERVICES.CMS.update(types_1.Entities.conversations, conversationId, conversationPayload);
                             // Registrar el mensaje recibido
                             const messagePayload = {
                                 conversationId: from,
