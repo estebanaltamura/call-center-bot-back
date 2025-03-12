@@ -9,31 +9,120 @@ import https from "https";
 
 import { db } from "./firebase";
 import { chatGpt } from "./services/chatGpt";
-import { ConversationStatusEnum, Entities, IConversations, IConversationsEntity, StateTypes } from "./types";
 import { SERVICES } from "./services";
+import { ConversationStatusEnum, Entities, IConversations } from "./types";
+
+dotenv.config();
 
 const app = express();
 app.use(bodyParser.json());
 app.use(cors());
 
-dotenv.config(); 
+/**
+ * Clase encargada de gestionar el documento "hat" en Firestore.
+ * Se suscribe a cambios y mantiene en memoria el prompt actualizado.
+ */
+class HatManager {
+  private hatData: { prompt: string } | null = null;
 
+  constructor(private docId: string) {
+    const hatRef = db.collection("hats").doc(this.docId);
+    hatRef.onSnapshot(
+      (snapshot) => {
+        if (snapshot.exists) {
+          const data = snapshot.data();
+          if (data && data.prompt) {
+            this.hatData = { prompt: data.prompt };
+            console.log("🔄 Hat actualizado:", this.hatData);
+          } else {
+            console.warn("⚠️ Documento 'hat' sin prompt.");
+            this.hatData = null;
+          }
+        } else {
+          console.error("❌ Documento 'hat' no encontrado.");
+          this.hatData = null;
+        }
+      },
+      (error) => {
+        console.error("❌ Error en la suscripción de hat:", error);
+      }
+    );
+  }
 
+  /**
+   * Retorna el prompt actual o null si no está disponible.
+   */
+  getPrompt(): string | null {
+    return this.hatData?.prompt || null;
+  }
+}
 
+// Instanciamos el gestor del hat con el ID del documento correspondiente.
+const hatManager = new HatManager("7f47b7ea-fc49-491a-9bbf-df8da1d3582d");
 
-// Token de verificación para el webhook
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+/**
+ * Función para procesar y responder a mensajes recibidos.
+ * Utiliza el prompt actualizado obtenido del HatManager.
+ */
+const sendMessage = async (to: string, messageReceived: string) => {
+  console.log(`📩 Mensaje recibido de ${to}: ${messageReceived}`);
 
-// Ruta para verificar el webhook
+  const prompt = hatManager.getPrompt();
+  if (!prompt) {
+    console.error("⚠️ No se encontró un prompt actualizado. No se puede responder.");
+    return;
+  }
+
+  // Se genera la respuesta usando el servicio de IA
+  const aiResponse = await chatGpt(prompt, [{ role: "user", content: messageReceived }]);
+  if (!aiResponse.content) return;
+
+  await sendWhatsappMessage(to, aiResponse.content);
+};
+
+/**
+ * Función para enviar mensajes vía la API de WhatsApp
+ * y registrar el mensaje enviado en Firestore.
+ */
+const sendWhatsappMessage = async (to: string, message: string) => {
+  try {
+    console.log(`📤 Enviando mensaje a ${to}: ${message}`);
+    const url = `https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`;
+    const payload = {
+      messaging_product: "whatsapp",
+      to,
+      type: "text",
+      text: { body: message },
+    };
+
+    await axios.post(url, payload, {
+      headers: {
+        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    // Registro del mensaje saliente en Firestore
+    await db.collection("messages").add({
+      conversationId: to,
+      sender: "company",
+      message,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log(`✅ Mensaje enviado a ${to}`);
+  } catch (error: any) {
+    console.error("❌ Error enviando mensaje:", error.response?.data || error);
+  }
+};
+
+// Webhook para verificar la conexión
 app.get("/webhook", (req, res) => {
-  console.log('entro')
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  console.log(mode, token, challenge, VERIFY_TOKEN)
-
-  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+  if (mode === "subscribe" && token === process.env.VERIFY_TOKEN) {
     console.log("Webhook verificado");
     res.status(200).send(challenge);
   } else {
@@ -41,61 +130,44 @@ app.get("/webhook", (req, res) => {
   }
 });
 
+// Webhook para recibir mensajes
 app.post("/webhook", async (req, res) => {
   const body = req.body;
 
-  console.log(body);
-
   if (body.object) {
-    const entries = body.entry || [];
-    for (const entry of entries) {
-      const changes = entry.changes || [];
-      for (const change of changes) {
+    for (const entry of body.entry || []) {
+      for (const change of entry.changes || []) {
         const value = change.value || {};
-        const messages = value.messages || [];
-
-        for (const message of messages) {
-          const from: string = message.from; // Número del remitente
-          const text: string = message.text?.body || ""; // Texto del mensaje
-
+        for (const message of value.messages || []) {
+          const from: string = message.from;
+          const text: string = message.text?.body || "";
           console.log(`Mensaje recibido de ${from}: ${text}`);
 
-          // Verificar si la conversación ya existe
+          // Verifica si la conversación ya existe
           const conversationRef = db.collection("conversations").doc(from);
           const conversationDoc = await conversationRef.get();
 
           if (!conversationDoc.exists) {
-            // Crear nueva conversación si no existe y responder con IA
-
-            // STATS NEW CONVERSATION
-            const payload:IConversations = {
+            const payload: IConversations = {
               phoneNumber: from,
               status: ConversationStatusEnum.INPROGRESS,
               auto: true,
               lastMessage: new Date(),
-            }
-
+            };
             SERVICES.CMS.create(Entities.conversations, payload);
-         
             console.log(`Conversación creada para ${from}`);
 
-            // Responder con la IA
             await sendMessage(from, text);
           } else {
-            // La conversación ya existe, verificamos el valor de `auto`
             const conversationData = conversationDoc.data();
-
-
-            // AGREGAR
             if (conversationData?.auto) {
-              // Si `auto` es true, responder con IA
               await sendMessage(from, text);
             } else {
               console.log(`No se responde al usuario ${from} porque auto es false.`);
             }
           }
 
-          // Registrar mensaje entrante en la colección "messages"
+          // Registrar el mensaje recibido
           await db.collection("messages").add({
             conversationId: from,
             sender: "customer",
@@ -106,40 +178,13 @@ app.post("/webhook", async (req, res) => {
         }
       }
     }
-
-    res.sendStatus(200); // Confirmar recepción al webhook
+    res.sendStatus(200);
   } else {
     res.sendStatus(404);
   }
 });
 
-
-
-
-const sendMessage = async (to: string, messageReceived: string) => {
-  console.log(to, messageReceived)
-
-  const currentHat = db.collection("hats").doc("7f47b7ea-fc49-491a-9bbf-df8da1d3582d");
-  const currentHatDoc = await currentHat.get();
-
-  if (!currentHatDoc.exists) {
-    console.error("El sombrero no existe.");
-    return;
-  }
-
-  const currentPrompt = currentHatDoc.data()?.prompt;
-  if (!currentPrompt) {
-    console.error("No hay un prompt para el sombrero asignado.");
-    return;
-  }
-  const res = await chatGpt(currentPrompt,[{role:'user',content:messageReceived}]);
-  
-  if(!res.content) return;
-  sendWhatsappMessage(to, res.content)
-
-
-};
-
+// Ruta para resumir conversaciones usando IA
 app.post("/summarize", async (req, res) => {
   const { conversation } = req.body;
 
@@ -147,19 +192,13 @@ app.post("/summarize", async (req, res) => {
     return res.status(400).json({ error: "Debe proporcionar el campo 'conversation' como string" });
   }
 
-  // Definir el prompt de sistema para la IA
   const systemPrompt =
-    "Eres un asistente que resumen conversaciones de whatsapp. Se te muestra una conversación de WhatsApp entre un asistente que vende actas italianas y un interesado. Tu tarea es resumir de forma super breve y sin hablar del contexto el cual esta implicito y aparte resaltar que tan cerca esta de comprar y el nivel de interes";
-
+    "Eres un asistente que resume conversaciones de WhatsApp. Se te muestra una conversación entre un asistente que vende actas italianas y un interesado. Tu tarea es resumir de forma super breve, sin mencionar el contexto, y resaltar el nivel de interés y la cercanía a la compra.";
   try {
-    // Llama a tu servicio de IA (chatGpt) pasando el prompt y la conversación
     const aiResponse = await chatGpt(systemPrompt, [{ role: "user", content: conversation }]);
-
     if (!aiResponse.content) {
       return res.status(500).json({ error: "No se obtuvo respuesta del modelo IA" });
     }
-
-    // Retornar el resumen generado
     return res.status(200).json({ summary: aiResponse.content });
   } catch (error: any) {
     console.error("Error en /summarize:", error.response?.data || error);
@@ -167,44 +206,8 @@ app.post("/summarize", async (req, res) => {
   }
 });
 
-// Ruta para enviar mensajes
-const sendWhatsappMessage = async (to: string, message: string) => {  try {
-  console.log(to, message)
-    // Enviar mensaje a través de la API de WhatsApp
-    const url = `https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`;
-    const payload = {
-      messaging_product: "whatsapp",
-      to,
-      type: "text",
-      text: { body: message },
-    };
-
-    const response = await axios.post(url, payload, {
-      headers: {
-        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    // Registrar mensaje saliente en la colección "messages"
-    await db.collection("messages").add({
-      conversationId: to,
-      sender: "company",
-      message,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    console.log(`Mensaje enviado a ${to}: ${message}`);
-   
-  } catch (error: any) {
-    console.error("Error enviando mensaje:", error.response?.data || error);
-   
-  }
-}
-
 // Ruta para enviar mensajes manualmente desde el backend
 app.post("/send-message", async (req, res) => {
-  console.log('Enviando mensaje...')
   const { to, message } = req.body;
 
   if (!to || !message) {
@@ -212,7 +215,6 @@ app.post("/send-message", async (req, res) => {
   }
 
   try {
-    // Llamamos al servicio para enviar el mensaje
     await sendWhatsappMessage(to, message);
     return res.status(200).json({ success: true, message: `Mensaje enviado a ${to}` });
   } catch (error: any) {
@@ -221,19 +223,15 @@ app.post("/send-message", async (req, res) => {
   }
 });
 
-
-
+// Configuración del servidor HTTPS
 const options = {
   key: fs.readFileSync('/etc/cert/privkey.pem'),
   cert: fs.readFileSync('/etc/cert/fullchain.pem')
 };
 
-
-// En lugar de usar app.listen, crea un servidor HTTPS:
-const PORT = process.env.PORT || 5150; // o el puerto que desees usar
+const PORT = process.env.PORT || 5150;
 const server = https.createServer(options, app);
 
-// Arranca el servidor HTTPS:
 server.listen(PORT, () => {
-  console.log(`Servidor HTTPS escuchando en el puerto ${PORT}`);
+  console.log(`🚀 Servidor HTTPS escuchando en el puerto ${PORT}`);
 });
