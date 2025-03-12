@@ -135,10 +135,11 @@ app.post("/webhook", async (req, res) => {
                     const conversationRef = firebase_1.db.collection("conversations").doc(from);
                     const conversationDoc = await conversationRef.get();
                     if (!conversationDoc.exists) {
-                        const payload = { phoneNumber: from,
+                        const payload = {
+                            phoneNumber: from,
                             status: types_1.ConversationStatusEnum.INPROGRESS,
                             auto: true,
-                            lastMessage: new Date(),
+                            lastMessageDate: firebase_admin_1.default.firestore.Timestamp.fromDate(new Date()),
                             id: from
                         };
                         services_1.SERVICES.CMS.create(types_1.Entities.conversations, payload);
@@ -155,12 +156,12 @@ app.post("/webhook", async (req, res) => {
                         }
                     }
                     // Registrar el mensaje recibido
-                    await firebase_1.db.collection("messages").add({
+                    const payload = {
                         conversationId: from,
                         sender: "customer",
                         message: text,
-                        timestamp: firebase_admin_1.default.firestore.FieldValue.serverTimestamp(),
-                    });
+                    };
+                    services_1.SERVICES.CMS.create(types_1.Entities.messages, payload);
                     console.log(`Mensaje registrado de ${from}`);
                 }
             }

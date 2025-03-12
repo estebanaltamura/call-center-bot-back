@@ -1,3 +1,6 @@
+import admin from "firebase-admin";
+
+
 // dynamicCreate.ts
 import { v4 as uuidv4 } from 'uuid';
 import { EntityTypesMapPayloadValues, EntityTypesMapReturnedValues, StateTypes } from '../../types';
@@ -9,12 +12,12 @@ export const dynamicCreate = async <T extends keyof EntityTypesMapPayloadValues>
   item: EntityTypesMapPayloadValues[T]
 ): Promise<EntityTypesMapReturnedValues[T] | undefined> => {
   const itemId = (item as unknown as any).id || uuidv4();
-  const payload: EntityTypesMapReturnedValues[T] = {
+  const payload: EntityTypesMapReturnedValues[T] & { id: any} = {
     id: itemId,
     ...item,
     softState: StateTypes.active,
     state: StateTypes.active,
-    createdAt: new Date(),
+    createdAt: admin.firestore.Timestamp.fromDate(new Date()),
   } as EntityTypesMapReturnedValues[T];
 
   try {

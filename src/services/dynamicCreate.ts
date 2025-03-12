@@ -1,6 +1,8 @@
 import { db } from "../firebase";
 import { EntityTypesMapPayloadValues, EntityTypesMapReturnedValues, StateTypes } from "../types";
 import { v4 as uuidv4 } from 'uuid';
+import admin from "firebase-admin";
+
 
 
 export const dynamicCreate = async <T extends keyof EntityTypesMapPayloadValues>(
@@ -16,8 +18,8 @@ export const dynamicCreate = async <T extends keyof EntityTypesMapPayloadValues>
     id: itemId,
     ...item,
     state: StateTypes.active,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: admin.firestore.Timestamp.fromDate(new Date()),
+    updatedAt: admin.firestore.Timestamp.fromDate(new Date()),
   } as EntityTypesMapReturnedValues[T];
 
   try {

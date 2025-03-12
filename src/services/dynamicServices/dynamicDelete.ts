@@ -1,6 +1,8 @@
 // dynamicDelete.ts
 import {  EntityTypesMapReturnedValues, StateTypes } from '../../types';
 import { db } from '../../firebase';
+import admin from "firebase-admin";
+
 
 export const dynamicDelete = async <T extends keyof EntityTypesMapReturnedValues>(
   entity: T,
@@ -14,7 +16,7 @@ export const dynamicDelete = async <T extends keyof EntityTypesMapReturnedValues
     }
     await docRef.update({
       state: StateTypes.inactive,
-      deletedAt: new Date(),
+      deletedAt: admin.firestore.Timestamp.fromDate(new Date()),
     });
     return { id, ...snapshot.data() } as EntityTypesMapReturnedValues[T];
   } catch (error) {

@@ -10,7 +10,7 @@ import https from "https";
 import { db } from "./firebase";
 import { chatGpt } from "./services/chatGpt";
 import { SERVICES } from "./services";
-import { ConversationStatusEnum, Entities, IConversations } from "./types";
+import { ConversationStatusEnum, Entities, IConversations, IMessage } from "./types";
 
 dotenv.config();
 
@@ -148,10 +148,11 @@ app.post("/webhook", async (req, res) => {
           const conversationDoc = await conversationRef.get();
 
           if (!conversationDoc.exists) {
-            const payload: IConversations & { id: string } = {              phoneNumber: from,
+            const payload: IConversations & { id: string } = {              
+              phoneNumber: from,
               status: ConversationStatusEnum.INPROGRESS,
               auto: true,
-              lastMessage: new Date(),
+              lastMessageDate: admin.firestore.Timestamp.fromDate(new Date()),
               id: from
             };
             SERVICES.CMS.create(Entities.conversations, payload);
@@ -168,12 +169,15 @@ app.post("/webhook", async (req, res) => {
           }
 
           // Registrar el mensaje recibido
-          await db.collection("messages").add({
+
+
+          const payload: IMessage = {              
             conversationId: from,
             sender: "customer",
             message: text,
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
-          });
+          };
+
+          SERVICES.CMS.create(Entities.messages, payload);          
           console.log(`Mensaje registrado de ${from}`);
         }
       }

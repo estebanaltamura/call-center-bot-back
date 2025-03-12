@@ -1,6 +1,10 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.dynamicCreate = void 0;
+const firebase_admin_1 = __importDefault(require("firebase-admin"));
 // dynamicCreate.ts
 const uuid_1 = require("uuid");
 const types_1 = require("../../types");
@@ -12,7 +16,7 @@ const dynamicCreate = async (collection, item) => {
         ...item,
         softState: types_1.StateTypes.active,
         state: types_1.StateTypes.active,
-        createdAt: new Date(),
+        createdAt: firebase_admin_1.default.firestore.Timestamp.fromDate(new Date()),
     };
     try {
         await firebase_1.db.collection(collection).doc(itemId).set(payload);

@@ -1,6 +1,8 @@
 // ** Firestore Imports
 import {  EntityTypesMapPayloadValues, EntityTypesMapReturnedValues, StateTypes } from '../../types';
 import { db } from '../../firebase';
+import admin from "firebase-admin";
+
 
 export const dynamicReactivateSoftDeleted = async <T extends keyof EntityTypesMapReturnedValues>(
   entity: T,
@@ -14,7 +16,7 @@ export const dynamicReactivateSoftDeleted = async <T extends keyof EntityTypesMa
     }
     await docRef.update({
       softState: StateTypes.active,
-      reactivatedAt: new Date(),
+      reactivatedAt: admin.firestore.Timestamp.fromDate(new Date()),
     });
     const updatedSnapshot = await docRef.get();
     return { id, ...updatedSnapshot.data() } as EntityTypesMapReturnedValues[T];

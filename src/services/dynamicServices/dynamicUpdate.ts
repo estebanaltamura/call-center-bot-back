@@ -1,6 +1,8 @@
 // dynamicUpdate.ts
 import {  EntityTypesMapPayloadValues, EntityTypesMapReturnedValues, StateTypes } from '../../types';
 import { db } from '../../firebase';
+import admin from "firebase-admin";
+
 
 export const dynamicUpdate = async <T extends keyof EntityTypesMapReturnedValues>(
   entity: T,
@@ -15,7 +17,7 @@ export const dynamicUpdate = async <T extends keyof EntityTypesMapReturnedValues
     }
     const payload = {
       ...item,
-      updatedAt: new Date(),
+      updatedAt: admin.firestore.Timestamp.fromDate(new Date()),
     };
     await docRef.update(payload);
     const updatedSnapshot = await docRef.get();
