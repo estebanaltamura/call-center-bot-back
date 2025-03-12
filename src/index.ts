@@ -195,27 +195,36 @@ app.post("/webhook", async (req, res) => {
             await SERVICES.CMS.create(Entities.conversations, payload);
             console.log(`Conversación creada para ${from}`);
 
+            // Registrar el mensaje recibido
+          const messagePayload: IMessage = {              
+            conversationId: from,
+            sender: "customer",
+            message: text,
+          };
+
+          await SERVICES.CMS.create(Entities.messages, messagePayload);          
+          console.log(`Mensaje registrado de ${from}`);
+
             await sendMessage(from, text);
           } else {
             const conversationData = conversationDoc.data();
             if (conversationData?.auto) {
+              // Registrar el mensaje recibido
+          const messagePayload: IMessage = {              
+            conversationId: from,
+            sender: "customer",
+            message: text,
+          };
+
+          await SERVICES.CMS.create(Entities.messages, messagePayload);      
+          
               await sendMessage(from, text);
             } else {
               console.log(`No se responde al usuario ${from} porque auto es false.`);
             }
           }
 
-          // Registrar el mensaje recibido
-
-
-          const payload: IMessage = {              
-            conversationId: from,
-            sender: "customer",
-            message: text,
-          };
-
-          await SERVICES.CMS.create(Entities.messages, payload);          
-          console.log(`Mensaje registrado de ${from}`);
+          
         }
       }
     }

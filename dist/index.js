@@ -173,25 +173,32 @@ app.post("/webhook", async (req, res) => {
                         };
                         await services_1.SERVICES.CMS.create(types_1.Entities.conversations, payload);
                         console.log(`Conversación creada para ${from}`);
+                        // Registrar el mensaje recibido
+                        const messagePayload = {
+                            conversationId: from,
+                            sender: "customer",
+                            message: text,
+                        };
+                        await services_1.SERVICES.CMS.create(types_1.Entities.messages, messagePayload);
+                        console.log(`Mensaje registrado de ${from}`);
                         await sendMessage(from, text);
                     }
                     else {
                         const conversationData = conversationDoc.data();
                         if (conversationData?.auto) {
+                            // Registrar el mensaje recibido
+                            const messagePayload = {
+                                conversationId: from,
+                                sender: "customer",
+                                message: text,
+                            };
+                            await services_1.SERVICES.CMS.create(types_1.Entities.messages, messagePayload);
                             await sendMessage(from, text);
                         }
                         else {
                             console.log(`No se responde al usuario ${from} porque auto es false.`);
                         }
                     }
-                    // Registrar el mensaje recibido
-                    const payload = {
-                        conversationId: from,
-                        sender: "customer",
-                        message: text,
-                    };
-                    await services_1.SERVICES.CMS.create(types_1.Entities.messages, payload);
-                    console.log(`Mensaje registrado de ${from}`);
                 }
             }
         }
