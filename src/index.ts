@@ -148,11 +148,11 @@ app.post("/webhook", async (req, res) => {
           const conversationDoc = await conversationRef.get();
 
           if (!conversationDoc.exists) {
-            const payload: IConversations = {
-              phoneNumber: from,
+            const payload: IConversations & { id: string } = {              phoneNumber: from,
               status: ConversationStatusEnum.INPROGRESS,
               auto: true,
               lastMessage: new Date(),
+              id: from
             };
             SERVICES.CMS.create(Entities.conversations, payload);
             console.log(`Conversación creada para ${from}`);
