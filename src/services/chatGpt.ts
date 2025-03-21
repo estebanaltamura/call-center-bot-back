@@ -17,7 +17,7 @@ type message = {
 
 export const chatGpt = async (contextPromt: string, messages: message[])=>{
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: '03-mini',
     messages: [
       {
         role: 'system',
