@@ -188,7 +188,7 @@ app.post("/send-first-message", async (req, res) => {
       type: "template",
       template: {
         name: "saludo_contacto_nuevo", // Nombre exacto de la plantilla aprobada
-        language: { code: "es" } // Código de idioma configurado en la plantilla
+        language: { code: "es_AR" } // Código de idioma que coincide con la plantilla en Facebook
       }
     };
 
