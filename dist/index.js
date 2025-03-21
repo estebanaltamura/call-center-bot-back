@@ -154,6 +154,40 @@ app.get("/webhook", (req, res) => {
         res.sendStatus(403);
     }
 });
+app.post("/send-first-message", async (req, res) => {
+    const { to } = req.body;
+    if (!to) {
+        return res.status(400).json({ error: "El campo 'to' es obligatorio." });
+    }
+    try {
+        const url = `https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`;
+        const payload = {
+            messaging_product: "whatsapp",
+            to, // Número del destinatario en formato internacional sin el signo +
+            type: "template",
+            template: {
+                name: "saludo_contacto_nuevo", // Nombre exacto de la plantilla aprobada
+                language: { code: "es" } // Código de idioma configurado en la plantilla
+            }
+        };
+        const response = await axios_1.default.post(url, payload, {
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`
+            }
+        });
+        res.status(200).json({
+            success: true,
+            data: response.data
+        });
+    }
+    catch (error) {
+        console.error("Error al enviar el mensaje:", error.response?.data || error.message);
+        res.status(500).json({
+            error: "Error al enviar el mensaje"
+        });
+    }
+});
 // Webhook para recibir mensajes
 app.post("/webhook", async (req, res) => {
     const body = req.body;
