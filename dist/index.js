@@ -111,13 +111,17 @@ const sendMessage = async (to, messageReceived, token) => {
     const computedDelay = 5000 + (questionLength + answerLength) * 70; // milisegundos
     const aiResponseTime = Date.now() - startTime;
     console.log(`Tiempo de respuesta de IA: ${aiResponseTime}ms. Delay calculado: ${computedDelay}ms.`);
+    // Verificar que no haya llegado un nuevo mensaje para este usuario
+    if (latestMessageToken.get(to) !== token) {
+        console.log(`Abortando envío de respuesta a ${to} debido a la llegada de un mensaje más reciente.`);
+        return;
+    }
     // Si la respuesta fue más rápida que el delay calculado, esperamos la diferencia
     if (aiResponseTime < computedDelay) {
         const waitTime = computedDelay - aiResponseTime;
         console.log(`Esperando ${waitTime}ms para que la respuesta parezca natural.`);
         await new Promise((resolve) => setTimeout(resolve, waitTime));
     }
-    // Verificar que no haya llegado un nuevo mensaje para este usuario
     if (latestMessageToken.get(to) !== token) {
         console.log(`Abortando envío de respuesta a ${to} debido a la llegada de un mensaje más reciente.`);
         return;
