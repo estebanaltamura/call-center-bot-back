@@ -116,8 +116,10 @@ const sendMessage = async (to: string, messageReceived: string, token: string) =
 
   // Cálculo del delay:
   // Base de 5000ms + 70ms por cada caracter de la pregunta y 70ms por cada caracter de la respuesta.
-  const questionLength = fullConversation.length;
+  const questionLength = messageReceived.length;
+  console.log('MENSAJE RECIBIDO', messageReceived, messageReceived.length)
   const answerLength = aiResponse.content.length;
+  console.log('RESPUESTA', aiResponse.content, aiResponse.content.length)
   const computedDelay = 5000 + (questionLength + answerLength) * 70; // milisegundos
 
   const aiResponseTime = Date.now() - startTime;
