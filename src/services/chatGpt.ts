@@ -29,7 +29,6 @@ export const chatGpt = async (contextPromt: string, messages: message[])=>{
       ...messages
     ],
     
-    max_completion_tokens: 1000,
   });
   
   return completion.choices[0].message;
