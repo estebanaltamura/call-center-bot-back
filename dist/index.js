@@ -57,38 +57,39 @@ class HatManager {
 }
 // Instanciamos el gestor del hat con el ID del documento correspondiente.
 const hatManager = new HatManager("7f47b7ea-fc49-491a-9bbf-df8da1d3582d");
+const latestMessageToken = new Map();
 /**
  * Función para procesar y responder a mensajes recibidos.
  * Utiliza el prompt actualizado obtenido del HatManager.
  */
-const sendMessage = async (to, messageReceived) => {
+const sendMessage = async (to, messageReceived, token) => {
+    // Registrar el token para la conversación
+    latestMessageToken.set(to, token);
+    // Capturamos el tiempo de inicio para calcular el delay
+    const startTime = Date.now();
     console.log(`📩 Mensaje recibido de ${to}: ${messageReceived}`);
     // Recuperar todo el hilo de mensajes para la conversación "to"
     const messagesSnapshot = await firebase_1.db
         .collection("messages")
         .where("conversationId", "==", to)
-        // Asumiendo que el campo "createdAt" es de tipo Timestamp de Firestore,
-        // orderBy('createdAt') ordena de forma precisa
         .orderBy("createdAt")
         .get();
-    // Extraer los mensajes y tiparlos (asumiendo que cada documento tiene la estructura de IMessageEntity)
     const conversationMessages = messagesSnapshot.docs.map((doc) => doc.data());
-    // Si fuera necesario, se puede ordenar manualmente hasta el nanosegundo:
+    // Ordenar manualmente hasta el nanosegundo si es necesario
     conversationMessages.sort((a, b) => {
-        // Si los seconds son iguales, ordena por nanosegundos
         if (a.createdAt.seconds === b.createdAt.seconds) {
             return a.createdAt.nanoseconds - b.createdAt.nanoseconds;
         }
         return a.createdAt.seconds - b.createdAt.seconds;
     });
-    // Crear un string con todo el hilo, agregando alguna etiqueta para identificar al remitente (opcional)
+    // Crear el string con el hilo completo de conversación
     const conversationText = conversationMessages
         .map((msg) => {
         const senderLabel = msg.sender === "company" ? "Empresa" : "Cliente";
         return `${senderLabel}: ${msg.message}`;
     })
         .join("\n");
-    // Opcional: Agregar el nuevo mensaje recibido al hilo
+    // Agregar el nuevo mensaje al hilo
     const fullConversation = conversationText + "\nCliente: " + messageReceived;
     console.log(fullConversation);
     // Obtener el prompt actualizado
@@ -101,6 +102,25 @@ const sendMessage = async (to, messageReceived) => {
     const aiResponse = await (0, chatGpt_1.chatGpt)(prompt, [{ role: "user", content: fullConversation }]);
     if (!aiResponse.content)
         return;
+    // Cálculo del delay:
+    // Base de 5000ms + 70ms por cada caracter de la pregunta y 70ms por cada caracter de la respuesta.
+    const questionLength = fullConversation.length;
+    const answerLength = aiResponse.content.length;
+    const computedDelay = 5000 + (questionLength + answerLength) * 70; // milisegundos
+    const aiResponseTime = Date.now() - startTime;
+    console.log(`Tiempo de respuesta de IA: ${aiResponseTime}ms. Delay calculado: ${computedDelay}ms.`);
+    // Si la respuesta fue más rápida que el delay calculado, esperamos la diferencia
+    if (aiResponseTime < computedDelay) {
+        const waitTime = computedDelay - aiResponseTime;
+        console.log(`Esperando ${waitTime}ms para que la respuesta parezca natural.`);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
+    // Verificar que no haya llegado un nuevo mensaje para este usuario
+    if (latestMessageToken.get(to) !== token) {
+        console.log(`Abortando envío de respuesta a ${to} debido a la llegada de un mensaje más reciente.`);
+        return;
+    }
+    // Enviar el mensaje vía WhatsApp
     await sendWhatsappMessage(to, aiResponse.content);
 };
 /**
@@ -199,7 +219,10 @@ app.post("/webhook", async (req, res) => {
                     const from = message.from;
                     const text = message.text?.body || "";
                     console.log(`Mensaje recibido de ${from}: ${text}`);
-                    // Verifica si la conversación ya existe
+                    // Generar un token único para este mensaje (por ejemplo, usando el timestamp)
+                    const token = Date.now().toString();
+                    latestMessageToken.set(from, token);
+                    // Verificar si la conversación ya existe
                     const conversationRef = firebase_1.db.collection("conversations").doc(from);
                     const conversationDoc = await conversationRef.get();
                     if (!conversationDoc.exists) {
@@ -220,7 +243,8 @@ app.post("/webhook", async (req, res) => {
                         };
                         await services_1.SERVICES.CMS.create(types_1.Entities.messages, messagePayload);
                         console.log(`Mensaje registrado de ${from}`);
-                        await sendMessage(from, text);
+                        // Procesar el mensaje pasando el token
+                        await sendMessage(from, text, token);
                     }
                     else {
                         const conversationData = conversationDoc.data();
@@ -237,7 +261,8 @@ app.post("/webhook", async (req, res) => {
                                 message: text,
                             };
                             await services_1.SERVICES.CMS.create(types_1.Entities.messages, messagePayload);
-                            await sendMessage(from, text);
+                            // Procesar el mensaje con el token actual
+                            await sendMessage(from, text, token);
                         }
                         else {
                             console.log(`No se responde al usuario ${from} porque auto es false.`);

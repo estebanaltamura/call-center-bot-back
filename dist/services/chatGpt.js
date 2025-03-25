@@ -13,7 +13,7 @@ const openai = new openai_1.default({
 });
 const chatGpt = async (contextPromt, messages) => {
     const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: 'o3-mini-2025-01-31pt-4o',
         messages: [
             {
                 role: 'system',
@@ -21,8 +21,7 @@ const chatGpt = async (contextPromt, messages) => {
             },
             ...messages
         ],
-        temperature: 0.8,
-        max_tokens: 1000,
+        max_completion_tokens: 1000,
     });
     return completion.choices[0].message;
 };
