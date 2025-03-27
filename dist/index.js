@@ -87,8 +87,7 @@ const sendWhatsappMessage = async (to, message) => {
         const conversationPayload = {
             lastMessageDate: firebase_admin_1.default.firestore.Timestamp.fromDate(new Date()),
         };
-        const conversationId = to;
-        await services_1.SERVICES.CMS.update(types_1.Entities.conversations, conversationId, conversationPayload);
+        await services_1.SERVICES.CMS.update(types_1.Entities.conversations, to, conversationPayload);
         console.log(`✅ Mensaje enviado a ${to}`);
     }
     catch (error) {
@@ -97,13 +96,12 @@ const sendWhatsappMessage = async (to, message) => {
 };
 /**
  * Función que procesa y envía la respuesta usando IA.
- * Se utiliza el token de la conversación para abortar si se actualizó.
+ * Se utiliza el token de la conversación para abortar si se actualiza.
  */
 const sendMessage = async (to, token) => {
     const state = conversationStates.get(to);
     if (!state)
         return;
-    // Si el token no coincide, abortamos
     if (state.token !== token) {
         console.log(`Abortando envío de respuesta a ${to} (token inicial: ${token}, actual: ${state.token}).`);
         return;
@@ -131,17 +129,16 @@ const sendMessage = async (to, token) => {
         return `${senderLabel}: ${msg.message}`;
     })
         .join("\n");
-    // Se agrega el último mensaje recibido (por si aún no fue almacenado)
+    // Se incluye el último mensaje recibido (por si aún no fue almacenado)
     const fullConversation = conversationText + "\nCliente: " + state.lastMessageText;
     console.log("Hilo completo de conversación:\n", fullConversation);
-    // Obtener prompt actualizado
+    // Obtener el prompt actualizado
     const prompt = hatManager.getPrompt();
     if (!prompt) {
         console.error("⚠️ No se encontró un prompt actualizado. Abortando respuesta.");
         state.processing = false;
         return;
     }
-    // Verificar nuevamente antes de llamar a la IA
     if (state.token !== token) {
         console.log(`Abortando envío de respuesta a ${to} (antes de IA) por cambio de token.`);
         state.processing = false;
@@ -157,10 +154,10 @@ const sendMessage = async (to, token) => {
         state.processing = false;
         return;
     }
-    // Cálculo del delay para simular naturalidad:
+    // Cálculo del delay para simular naturalidad
     const questionLength = state.lastMessageText.length;
     const answerLength = aiResponse.content.length;
-    const computedDelay = 5000 + (questionLength + answerLength) * 70;
+    const computedDelay = 3500 + (questionLength + answerLength) * 50;
     const aiResponseTime = Date.now() - startTime;
     console.log(`Tiempo de respuesta de IA: ${aiResponseTime}ms. Delay calculado: ${computedDelay}ms.`);
     if (aiResponseTime < computedDelay) {
@@ -168,13 +165,11 @@ const sendMessage = async (to, token) => {
         console.log(`Esperando ${waitTime}ms antes de enviar respuesta a ${to}.`);
         await new Promise((resolve) => setTimeout(resolve, waitTime));
     }
-    // Última verificación antes de enviar
     if (state.token !== token) {
         console.log(`Abortando envío de respuesta a ${to} (final) por cambio de token.`);
         state.processing = false;
         return;
     }
-    // Enviar mensaje vía WhatsApp
     await sendWhatsappMessage(to, aiResponse.content);
     state.processing = false;
 };
@@ -189,15 +184,17 @@ const processConversation = async (to) => {
     await sendMessage(to, token);
 };
 /**
- * Webhook para recibir mensajes con mecanismo robusto de debounce y cancelación.
- * Cada mensaje actualiza el estado (token y último mensaje) y se programa un timer.
- * Si llega un nuevo mensaje antes de que se ejecute el timer, se cancela el anterior.
+ * Webhook para recibir mensajes.
+ * Se acumulan los IDs de conversación actualizados y, al terminar de recorrer el request,
+ * se programa un único timer por conversación para procesar la respuesta.
  */
 app.post("/webhook", async (req, res) => {
     const body = req.body;
     if (!body.object) {
         return res.sendStatus(404);
     }
+    // Para acumular los números que se actualizan en este request
+    const updatedConversations = new Set();
     for (const entry of body.entry || []) {
         for (const change of entry.changes || []) {
             const value = change.value || {};
@@ -205,7 +202,7 @@ app.post("/webhook", async (req, res) => {
                 const from = message.from;
                 const text = message.text?.body || "";
                 console.log(`Mensaje recibido de ${from}: ${text}`);
-                // Actualizar o crear el estado de la conversación.
+                // Actualizar o crear el estado de la conversación
                 let state = conversationStates.get(from);
                 const newToken = `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
                 if (!state) {
@@ -218,17 +215,14 @@ app.post("/webhook", async (req, res) => {
                     conversationStates.set(from, state);
                 }
                 else {
-                    // Si hay procesamiento en curso, marcar cancelado.
                     if (state.processing) {
                         state.cancelled = true;
                     }
                     state.token = newToken;
                     state.lastMessageText = text;
-                    if (state.timer) {
-                        clearTimeout(state.timer);
-                    }
                 }
-                // Registrar o actualizar la conversación en Firestore
+                updatedConversations.add(from);
+                // Registro o actualización en Firestore
                 const conversationRef = firebase_1.db.collection("conversations").doc(from);
                 const conversationDoc = await conversationRef.get();
                 if (!conversationDoc.exists) {
@@ -267,12 +261,20 @@ app.post("/webhook", async (req, res) => {
                         console.log(`No se responde al usuario ${from} porque auto es false.`);
                     }
                 }
-                // Programar el debounce (800ms de inactividad)
-                state.timer = setTimeout(async () => {
-                    state.timer = undefined;
-                    await processConversation(from);
-                }, 800);
             }
+        }
+    }
+    // Una vez procesados todos los mensajes, para cada conversación actualizada se programa un único timer.
+    for (const from of updatedConversations) {
+        const state = conversationStates.get(from);
+        if (state) {
+            if (state.timer) {
+                clearTimeout(state.timer);
+            }
+            state.timer = setTimeout(async () => {
+                state.timer = undefined;
+                await processConversation(from);
+            }, 800);
         }
     }
     res.sendStatus(200);
