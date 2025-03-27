@@ -98,6 +98,10 @@ const sendMessage = async (to, messageReceived, token) => {
         console.error("⚠️ No se encontró un prompt actualizado. No se puede responder.");
         return;
     }
+    if (latestMessageToken.get(to) !== token) {
+        console.log(`Abortando envío de respuesta a ${to} debido a la llegada de un mensaje más reciente.`);
+        return;
+    }
     // Se genera la respuesta usando el servicio de IA pasando el hilo completo
     const aiResponse = await (0, chatGpt_1.chatGpt)(prompt, [{ role: "user", content: fullConversation }]);
     if (!aiResponse.content)
