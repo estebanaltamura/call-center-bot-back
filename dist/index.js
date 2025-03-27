@@ -55,83 +55,8 @@ class HatManager {
         return this.hatData?.prompt || null;
     }
 }
-// Instanciamos el gestor del hat con el ID del documento correspondiente.
 const hatManager = new HatManager("7f47b7ea-fc49-491a-9bbf-df8da1d3582d");
-// Mapas para manejar el token más reciente, el último mensaje y temporizadores por conversación.
-const latestMessageToken = new Map();
-const latestMessageText = new Map();
-const debounceTimers = new Map();
-/**
- * Función para procesar y responder a mensajes recibidos.
- * Utiliza el prompt actualizado obtenido del HatManager.
- */
-const sendMessage = async (to, messageReceived, token) => {
-    // Registrar el token (se actualiza, aunque ya lo establezcamos en el webhook)
-    latestMessageToken.set(to, token);
-    const startTime = Date.now();
-    console.log(`📩 Mensaje recibido de ${to}: ${messageReceived}`);
-    // Recuperar todo el hilo de mensajes para la conversación "to"
-    const messagesSnapshot = await firebase_1.db
-        .collection("messages")
-        .where("conversationId", "==", to)
-        .orderBy("createdAt")
-        .get();
-    const conversationMessages = messagesSnapshot.docs.map((doc) => doc.data());
-    // Ordenar manualmente hasta el nanosegundo si es necesario
-    conversationMessages.sort((a, b) => {
-        if (a.createdAt.seconds === b.createdAt.seconds) {
-            return a.createdAt.nanoseconds - b.createdAt.nanoseconds;
-        }
-        return a.createdAt.seconds - b.createdAt.seconds;
-    });
-    // Crear el string con el hilo completo de conversación
-    const conversationText = conversationMessages
-        .map((msg) => {
-        const senderLabel = msg.sender === "company" ? "Empresa" : "Cliente";
-        return `${senderLabel}: ${msg.message}`;
-    })
-        .join("\n");
-    // Se incluye el mensaje recibido en caso de que Firestore no lo tenga aún (puede comentarse si ya está almacenado)
-    const fullConversation = conversationText + "\nCliente: " + messageReceived;
-    console.log(fullConversation);
-    // Obtener el prompt actualizado
-    const prompt = hatManager.getPrompt();
-    if (!prompt) {
-        console.error("⚠️ No se encontró un prompt actualizado. No se puede responder.");
-        return;
-    }
-    if (latestMessageToken.get(to) !== token) {
-        console.log(`Abortando envío de respuesta a ${to} debido a la llegada de un mensaje más reciente.`);
-        return;
-    }
-    // Se genera la respuesta usando el servicio de IA pasando el hilo completo
-    const aiResponse = await (0, chatGpt_1.chatGpt)(prompt, [{ role: "user", content: fullConversation }]);
-    if (!aiResponse.content)
-        return;
-    // Cálculo del delay:
-    // Base de 5000ms + 70ms por cada caracter de la pregunta y 70ms por cada caracter de la respuesta.
-    const questionLength = messageReceived.length;
-    const answerLength = aiResponse.content.length;
-    const computedDelay = 5000 + (questionLength + answerLength) * 70; // milisegundos
-    const aiResponseTime = Date.now() - startTime;
-    console.log(`Tiempo de respuesta de IA: ${aiResponseTime}ms. Delay calculado: ${computedDelay}ms.`);
-    if (latestMessageToken.get(to) !== token) {
-        console.log(`Abortando envío de respuesta a ${to} debido a la llegada de un mensaje más reciente.`);
-        return;
-    }
-    // Si la respuesta fue más rápida que el delay calculado, esperamos la diferencia
-    if (aiResponseTime < computedDelay) {
-        const waitTime = computedDelay - aiResponseTime;
-        console.log(`Esperando ${waitTime}ms para que la respuesta parezca natural.`);
-        await new Promise((resolve) => setTimeout(resolve, waitTime));
-    }
-    if (latestMessageToken.get(to) !== token) {
-        console.log(`Abortando envío de respuesta a ${to} debido a la llegada de un mensaje más reciente.`);
-        return;
-    }
-    // Enviar el mensaje vía WhatsApp
-    await sendWhatsappMessage(to, aiResponse.content);
-};
+const conversationStates = new Map();
 /**
  * Función para enviar mensajes vía la API de WhatsApp
  * y registrar el mensaje enviado en Firestore.
@@ -170,7 +95,191 @@ const sendWhatsappMessage = async (to, message) => {
         console.error("❌ Error enviando mensaje:", error.response?.data || error);
     }
 };
-// Webhook para verificar la conexión
+/**
+ * Función que procesa y envía la respuesta usando IA.
+ * Se utiliza el token de la conversación para abortar si se actualizó.
+ */
+const sendMessage = async (to, token) => {
+    const state = conversationStates.get(to);
+    if (!state)
+        return;
+    // Si el token no coincide, abortamos
+    if (state.token !== token) {
+        console.log(`Abortando envío de respuesta a ${to} (token inicial: ${token}, actual: ${state.token}).`);
+        return;
+    }
+    state.processing = true;
+    state.cancelled = false;
+    const startTime = Date.now();
+    console.log(`📩 Procesando respuesta para ${to}: "${state.lastMessageText}"`);
+    // Recuperar el hilo de mensajes de Firestore
+    const messagesSnapshot = await firebase_1.db
+        .collection("messages")
+        .where("conversationId", "==", to)
+        .orderBy("createdAt")
+        .get();
+    const conversationMessages = messagesSnapshot.docs.map((doc) => doc.data());
+    conversationMessages.sort((a, b) => {
+        if (a.createdAt.seconds === b.createdAt.seconds) {
+            return a.createdAt.nanoseconds - b.createdAt.nanoseconds;
+        }
+        return a.createdAt.seconds - b.createdAt.seconds;
+    });
+    const conversationText = conversationMessages
+        .map((msg) => {
+        const senderLabel = msg.sender === "company" ? "Empresa" : "Cliente";
+        return `${senderLabel}: ${msg.message}`;
+    })
+        .join("\n");
+    // Se agrega el último mensaje recibido (por si aún no fue almacenado)
+    const fullConversation = conversationText + "\nCliente: " + state.lastMessageText;
+    console.log("Hilo completo de conversación:\n", fullConversation);
+    // Obtener prompt actualizado
+    const prompt = hatManager.getPrompt();
+    if (!prompt) {
+        console.error("⚠️ No se encontró un prompt actualizado. Abortando respuesta.");
+        state.processing = false;
+        return;
+    }
+    // Verificar nuevamente antes de llamar a la IA
+    if (state.token !== token) {
+        console.log(`Abortando envío de respuesta a ${to} (antes de IA) por cambio de token.`);
+        state.processing = false;
+        return;
+    }
+    const aiResponse = await (0, chatGpt_1.chatGpt)(prompt, [{ role: "user", content: fullConversation }]);
+    if (!aiResponse.content) {
+        state.processing = false;
+        return;
+    }
+    if (state.token !== token) {
+        console.log(`Abortando envío de respuesta a ${to} (después de IA) por cambio de token.`);
+        state.processing = false;
+        return;
+    }
+    // Cálculo del delay para simular naturalidad:
+    const questionLength = state.lastMessageText.length;
+    const answerLength = aiResponse.content.length;
+    const computedDelay = 5000 + (questionLength + answerLength) * 70;
+    const aiResponseTime = Date.now() - startTime;
+    console.log(`Tiempo de respuesta de IA: ${aiResponseTime}ms. Delay calculado: ${computedDelay}ms.`);
+    if (aiResponseTime < computedDelay) {
+        const waitTime = computedDelay - aiResponseTime;
+        console.log(`Esperando ${waitTime}ms antes de enviar respuesta a ${to}.`);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
+    // Última verificación antes de enviar
+    if (state.token !== token) {
+        console.log(`Abortando envío de respuesta a ${to} (final) por cambio de token.`);
+        state.processing = false;
+        return;
+    }
+    // Enviar mensaje vía WhatsApp
+    await sendWhatsappMessage(to, aiResponse.content);
+    state.processing = false;
+};
+/**
+ * Función para procesar la conversación luego del debounce.
+ */
+const processConversation = async (to) => {
+    const state = conversationStates.get(to);
+    if (!state)
+        return;
+    const token = state.token;
+    await sendMessage(to, token);
+};
+/**
+ * Webhook para recibir mensajes con mecanismo robusto de debounce y cancelación.
+ * Cada mensaje actualiza el estado (token y último mensaje) y se programa un timer.
+ * Si llega un nuevo mensaje antes de que se ejecute el timer, se cancela el anterior.
+ */
+app.post("/webhook", async (req, res) => {
+    const body = req.body;
+    if (!body.object) {
+        return res.sendStatus(404);
+    }
+    for (const entry of body.entry || []) {
+        for (const change of entry.changes || []) {
+            const value = change.value || {};
+            for (const message of value.messages || []) {
+                const from = message.from;
+                const text = message.text?.body || "";
+                console.log(`Mensaje recibido de ${from}: ${text}`);
+                // Actualizar o crear el estado de la conversación.
+                let state = conversationStates.get(from);
+                const newToken = `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+                if (!state) {
+                    state = {
+                        token: newToken,
+                        lastMessageText: text,
+                        processing: false,
+                        cancelled: false,
+                    };
+                    conversationStates.set(from, state);
+                }
+                else {
+                    // Si hay procesamiento en curso, marcar cancelado.
+                    if (state.processing) {
+                        state.cancelled = true;
+                    }
+                    state.token = newToken;
+                    state.lastMessageText = text;
+                    if (state.timer) {
+                        clearTimeout(state.timer);
+                    }
+                }
+                // Registrar o actualizar la conversación en Firestore
+                const conversationRef = firebase_1.db.collection("conversations").doc(from);
+                const conversationDoc = await conversationRef.get();
+                if (!conversationDoc.exists) {
+                    const payload = {
+                        phoneNumber: from,
+                        status: types_1.ConversationStatusEnum.INPROGRESS,
+                        auto: true,
+                        lastMessageDate: firebase_admin_1.default.firestore.Timestamp.fromDate(new Date()),
+                        id: from,
+                    };
+                    await services_1.SERVICES.CMS.create(types_1.Entities.conversations, payload);
+                    console.log(`Conversación creada para ${from}`);
+                    const messagePayload = {
+                        conversationId: from,
+                        sender: "customer",
+                        message: text,
+                    };
+                    await services_1.SERVICES.CMS.create(types_1.Entities.messages, messagePayload);
+                    console.log(`Mensaje registrado de ${from}`);
+                }
+                else {
+                    const conversationData = conversationDoc.data();
+                    if (conversationData?.auto) {
+                        const conversationPayload = {
+                            lastMessageDate: firebase_admin_1.default.firestore.Timestamp.fromDate(new Date()),
+                        };
+                        await services_1.SERVICES.CMS.update(types_1.Entities.conversations, conversationData.id, conversationPayload);
+                        const messagePayload = {
+                            conversationId: from,
+                            sender: "customer",
+                            message: text,
+                        };
+                        await services_1.SERVICES.CMS.create(types_1.Entities.messages, messagePayload);
+                    }
+                    else {
+                        console.log(`No se responde al usuario ${from} porque auto es false.`);
+                    }
+                }
+                // Programar el debounce (800ms de inactividad)
+                state.timer = setTimeout(async () => {
+                    state.timer = undefined;
+                    await processConversation(from);
+                }, 800);
+            }
+        }
+    }
+    res.sendStatus(200);
+});
+/**
+ * Webhook de verificación para Facebook.
+ */
 app.get("/webhook", (req, res) => {
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
@@ -183,6 +292,9 @@ app.get("/webhook", (req, res) => {
         res.sendStatus(403);
     }
 });
+/**
+ * Ruta para enviar el primer mensaje utilizando una plantilla.
+ */
 app.post("/send-first-message", async (req, res) => {
     const { to } = req.body;
     if (!to) {
@@ -212,101 +324,12 @@ app.post("/send-first-message", async (req, res) => {
     }
     catch (error) {
         console.error("Error al enviar el mensaje:", error.response?.data || error.message);
-        res.status(500).json({
-            error: "Error al enviar el mensaje"
-        });
+        res.status(500).json({ error: "Error al enviar el mensaje" });
     }
 });
 /**
- * Función que procesa la conversación de un usuario luego del tiempo de debounce.
+ * Ruta para resumir conversaciones usando IA.
  */
-const processConversation = async (to) => {
-    const token = latestMessageToken.get(to);
-    const messageReceived = latestMessageText.get(to);
-    if (!messageReceived || !token)
-        return;
-    await sendMessage(to, messageReceived, token);
-};
-/**
- * Webhook para recibir mensajes con mecanismo de debounce.
- * Por cada mensaje recibido se registra (o actualiza) el token y texto;
- * si ya hay un temporizador pendiente para esa conversación se cancela
- * y se programa uno nuevo (por ejemplo, 800ms).
- */
-app.post("/webhook", async (req, res) => {
-    const body = req.body;
-    if (body.object) {
-        for (const entry of body.entry || []) {
-            for (const change of entry.changes || []) {
-                const value = change.value || {};
-                for (const message of value.messages || []) {
-                    const from = message.from;
-                    const text = message.text?.body || "";
-                    console.log(`Mensaje recibido de ${from}: ${text}`);
-                    // Generar un token único para el mensaje (se puede usar Date.now())
-                    const token = Date.now().toString();
-                    latestMessageToken.set(from, token);
-                    latestMessageText.set(from, text);
-                    // Registrar o actualizar la conversación en Firestore
-                    const conversationRef = firebase_1.db.collection("conversations").doc(from);
-                    const conversationDoc = await conversationRef.get();
-                    if (!conversationDoc.exists) {
-                        const payload = {
-                            phoneNumber: from,
-                            status: types_1.ConversationStatusEnum.INPROGRESS,
-                            auto: true,
-                            lastMessageDate: firebase_admin_1.default.firestore.Timestamp.fromDate(new Date()),
-                            id: from
-                        };
-                        await services_1.SERVICES.CMS.create(types_1.Entities.conversations, payload);
-                        console.log(`Conversación creada para ${from}`);
-                        const messagePayload = {
-                            conversationId: from,
-                            sender: "customer",
-                            message: text
-                        };
-                        await services_1.SERVICES.CMS.create(types_1.Entities.messages, messagePayload);
-                        console.log(`Mensaje registrado de ${from}`);
-                    }
-                    else {
-                        const conversationData = conversationDoc.data();
-                        if (conversationData?.auto) {
-                            const conversationPayload = {
-                                lastMessageDate: firebase_admin_1.default.firestore.Timestamp.fromDate(new Date()),
-                            };
-                            const conversationId = conversationData.id;
-                            await services_1.SERVICES.CMS.update(types_1.Entities.conversations, conversationId, conversationPayload);
-                            const messagePayload = {
-                                conversationId: from,
-                                sender: "customer",
-                                message: text
-                            };
-                            await services_1.SERVICES.CMS.create(types_1.Entities.messages, messagePayload);
-                        }
-                        else {
-                            console.log(`No se responde al usuario ${from} porque auto es false.`);
-                        }
-                    }
-                    // Implementar debounce: si ya hay un temporizador para este número se cancela
-                    if (debounceTimers.has(from)) {
-                        clearTimeout(debounceTimers.get(from));
-                    }
-                    // Programar un nuevo temporizador (800ms de inactividad)
-                    const timer = setTimeout(async () => {
-                        debounceTimers.delete(from);
-                        await processConversation(from);
-                    }, 800);
-                    debounceTimers.set(from, timer);
-                }
-            }
-        }
-        res.sendStatus(200);
-    }
-    else {
-        res.sendStatus(404);
-    }
-});
-// Ruta para resumir conversaciones usando IA
 app.post("/summarize", async (req, res) => {
     const { conversation } = req.body;
     if (!conversation || typeof conversation !== "string") {
@@ -325,7 +348,9 @@ app.post("/summarize", async (req, res) => {
         return res.status(500).json({ error: "Error al procesar la solicitud" });
     }
 });
-// Ruta para enviar mensajes manualmente desde el backend
+/**
+ * Ruta para enviar mensajes manualmente desde el backend.
+ */
 app.post("/send-message", async (req, res) => {
     const { to, message } = req.body;
     if (!to || !message) {
