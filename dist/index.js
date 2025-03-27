@@ -172,7 +172,7 @@ class ConversationController {
             // Calcular delay para naturalidad
             const questionLength = latestMessage.length;
             const answerLength = aiResponse.content.length;
-            const computedDelay = 5000 + (questionLength + answerLength) * 70;
+            const computedDelay = 3500 + (questionLength + answerLength) * 40;
             const aiResponseTime = Date.now() - startTime;
             console.log(`Tiempo de respuesta de IA: ${aiResponseTime}ms. Delay calculado: ${computedDelay}ms.`);
             if (aiResponseTime < computedDelay) {
